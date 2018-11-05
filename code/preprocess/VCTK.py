@@ -4,9 +4,14 @@
 # Extract Wav Info List {Wav ID : PATH, SPK_ID, UTT_ID}
 # Extract feature (Wav -(Vocoder)-> Feature)
 # Save File
+
+# Result : In data/wavFeatDict.pk => { Wav ID : wavFeature() }
 from code.include import env, dataSet, neuralNets
-import vocoder
+from code.include import fileManager as fm
+from code.include import logManager as lm
+from . import vocoder
 import os, sys
+
 
 class WavMetaInfoExtractor:
     def __init__(self):
@@ -17,14 +22,20 @@ class WavMetaInfoExtractor:
     def __setWavPath__(self,wavId,wavPath):
         self.wavMetaInfo["PATH"][wavId]=wavPath
     def __setWavSpk__(self,wavId,spkId):
-        self.wavMetaInfo["PATH"][wavId]=spkId
+        self.wavMetaInfo["SPK"][wavId]=spkId
     def __setWavUtt__(self,wavId,uttId):
-        self.wavMetaInfo["PATH"][wavId]=uttId
-    def readWavDirectory(self,originWavDir,wavPathListPath):
-        findCommand="find "+originWavDir+" -iname '*.wav' > "+ wavPathListPath
+        self.wavMetaInfo["UTT"][wavId]=uttId
+
+    def readCorpus(self,corpusDir,wavPathListPath):
+        findCommand="find "+corpusDir+" -iname '*.wav' > "+ wavPathListPath
         os.system(findCommand)
         wavPathList=self.__loadWavPathList__(wavPathListPath)
-        self.__saveWavMeta__(wavPathList)
+        self.__setWavMeta__(wavPathList)
+
+    def readCorpusfromConfig(self,config):
+        corpusDir=config.getCorpusPath()
+        wavPathListPath=config.getWorkingFilePath("WAV_PATH_LIST")
+        self.readCorpus(corpusDir,wavPathListPath)
     
     def __VCTK_extract_FilePath__(self,line):
         return line[:-1]
@@ -45,7 +56,7 @@ class WavMetaInfoExtractor:
                 wavPath=self.__VCTK_extract_FilePath__(line)
                 wavPathList.append(wavPath)
         return wavPathList
-    def __saveWavMeta__(self,wavPathList):
+    def __setWavMeta__(self,wavPathList):
         for wavPath in wavPathList:
             wavId=self.__VCTK_extract_WavId__(wavPath)
             self.__setWavPath__(wavId,wavPath)
@@ -59,17 +70,49 @@ class WavMetaInfoExtractor:
     def getWavPathDict(self):
         return self.wavMetaInfo["PATH"]
 
+class WavFeatExtractor:
+    def __init__(self):
+        #self.wavVocoder=vocoder.Vocoder()
+        self.wavPath=""
+        self.wavPathDict=dict()
+    def setVocoder(self,vocoderType):
+        if vocoderType=="WORLD":
+            self.wavVocoder=vocoder.WORLD_VOCODER()
+    def setVocoderfromConfig(self,config):
+        vocoderType=config.getVocoderType()
+        self.setVocoder(vocoderType)
+
+    def extractFeat(self,wavPath):
+        wavFeature=self.wavVocoder.wavToFeat(wavPath)
+        return wavFeature
+
+    def extractFeatDict(self,wavPathDict):
+        wavFeatDict=dict()
+        for wavId,wavPath in wavPathDict.items():
+            wavFeature=self.extractFeat(wavPath)
+            wavFeatDict[wavId]=wavFeature
+        return wavFeatDict
+    def saveFeat(self,wavFeatPath,wavFeat):
+        fm.saveVariable(wavFeatPath,wavFeat)
+    def extractAndSaveFeatDict(self,wavPathDict,config):
+        for wavId,wavPath in wavPathDict.items():
+            print(wavId)
+            wavFeatPath=config.getFeaturePath(wavId)
+            wavFeature=self.extractFeat(wavPath)
+            self.saveFeat(wavFeatPath,wavFeature)
+
 def main():
     configPath=sys.argv[1]
-    config=env.loadConfig(configPath)
-    originDataDir=config["FILE_DIR"]["ORIGIN_DATA_DIR"]
-    workingDataDir=config["FILE_DIR"]["WORKING_DATA_DIR"]
-    wavPathListFileName=config["FILE_DIR"]["WAV_PATH_LIST"]
-    wavPathListPath=workingDataDir+"/"+wavPathListFileName
+    config=env.Config(configPath)
+
     wavMetaInfoExtractor=WavMetaInfoExtractor()
-    wavMetaInfoExtractor.readWavDirectory(originDataDir,wavPathListPath)
+    wavMetaInfoExtractor.readCorpusfromConfig(config)
     wavPathDict=wavMetaInfoExtractor.getWavPathDict()
 
+    wavFeatExtractor=WavFeatExtractor()
+    
+    wavFeatExtractor.setVocoderfromConfig(config)
+    wavFeatExtractor.extractAndSaveFeatDict(wavPathDict,config)
 
     return 0
 
